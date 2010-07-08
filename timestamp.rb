@@ -1,5 +1,6 @@
 class Transacao
 
+  attr_accessor :dados_bloqueados
   attr_reader :id, :ts, :historia
 
   def initialize(historia, ts, id)
@@ -10,6 +11,8 @@ class Transacao
     @ts = ts
     @id = id
     p "Transacao criada #{@id}, #{@historia}"
+
+    @dados_bloqueados = Hash.new
   end
 
   def next_operation
@@ -21,6 +24,7 @@ class Transacao
   end
 
   def execute(dado)
+
      op = @operations.first
      @operations.delete_at(0)
 
@@ -29,6 +33,8 @@ class Transacao
          dado.ts_read = @ts
        end
      else
+         dado.current_transaction = @id
+         @dados_bloqueados[dado.value] = dado
          dado.ts_write = @ts
      end
      p "Executada thread: #{@id.to_s}; timestamp: #{@ts}; operacao: #{op.type}; dado: #{dado.value};"
@@ -63,11 +69,11 @@ class Dado
   attr_reader :value
   attr_accessor :ts_read, :ts_write, :current_transaction, :fila_wait
 
-  def initialize value, ts_read, ts_write, current_transaction
+  def initialize value, ts_read, ts_write
     @value = value
     @ts_read = ts_read
     @ts_write = ts_write
-    @current_transaction = current_transaction
+    @current_transaction = nil
     @fila_wait = Array.new
   end
 end
@@ -82,68 +88,93 @@ class Scheduler
     while !transactions.empty? do
 
       posicao = rand(transactions.size)
+
       t = transactions[posicao]
       p "Selecionada thread: #{t.id.to_s}, #{t.historia}"
+
+      if t.finished? then
+
+        transactions.delete(t.id) 
+
+        t.dados_bloqueados.each { |k, db|
+            db.current_transaction = nil
+            if !db.fila_wait.empty?
+                t_wait  = db.fila_wait.pop
+                transactions[t_wait.id] = t_wait
+            end
+        }
+
+        p "Commiting thread: #{t.id.to_s}"
+
+        next
+      end
+
       operation = t.next_operation
 
       if operation.type == 'r' then
 
         if (!dados.key?(operation.dado)) then
-          dados[operation.dado] = Dado.new(operation.dado, 0, 0, t.id)
+          dados[operation.dado] = Dado.new(operation.dado, 0, 0)
         end
 
         d = dados[operation.dado]
         if t.ts < d.ts_write then
+
           t.abort d
-          transactions[posicao] = Transacao.new(t.historia, Time.new.to_i, t.id)
-          if !d.fila_wait.empty?
-              transactions.push(d.fila_wait.pop)
-          end
+
+          t.dados_bloqueados.each { |k, db|
+              db.current_transaction = nil
+              if !db.fila_wait.empty?
+                  t_wait  = d.fila_wait.pop
+                  p 'remove wait'
+                  transactions[t_wait.id] = t_wait
+              end
+          }
+
+          transactions[t.id] = Transacao.new(t.historia, Time.new.to_i, t.id)
+
         else
 
-          if !d.fila_wait.empty?
-            p "Indo para fila wait #{t.id}", d.fila_wait
-            d.fila_wait[t.id] = t
-            transactions.delete_at(posicao)
+          if !d.current_transaction.nil? && d.current_transaction != t.id && t.ts > d.ts_write then
+            d.fila_wait.insert(0, t)
+            transactions.delete(t.id)
+            p "Incluindo na fila wait #{t.id}, #{operation.type}(#{d.value})"
           else
+
             t.execute d
-            if t.finished? then
-              transactions.delete_at posicao
-              if !d.fila_wait.empty?
-                  transactions.push(d.fila_wait.pop)
-              end
-              p "Commiting thread: #{t.id.to_s}"
-            end # finished
+
           end #fila wait
         end # ts comparison
 
       else
         if (!dados.key?(operation.dado)) then
-          dados[operation.dado] = Dado.new(operation.dado, 0, 0, t.id)
+          dados[operation.dado] = Dado.new(operation.dado, 0, 0)
         end
 
         d = dados[operation.dado]
         if ((t.ts < d.ts_read) || (t.ts < d.ts_write)) then
+
           t.abort d
-          transactions[posicao] = Transacao.new(t.historia, Time.new.to_i, t.id)
-          if !d.fila_wait.empty?
-            transactions.push(d.fila_wait.pop)
-          end
+          transactions[t.id] = Transacao.new(t.historia, Time.new.to_i, t.id)
+
+          t.dados_bloqueados.each { |k, db|
+              db.current_transaction = nil
+              if !db.fila_wait.empty?
+                  t_wait  = d.fila_wait.pop
+                  p 'remove wait'
+                  transactions[t_wait.id] = t_wait
+              end
+          }
+
         else
-          if !d.fila_wait.empty?
-            p "Indo para fila wait #{t.id}", d.fila_wait
-            d.fila_wait[t.id] = t
-            transactions.delete_at(posicao)
+
+          if !d.current_transaction.nil? && d.current_transaction != t.id && t.ts > d.ts_write then
+            d.fila_wait.insert(0, t)
+            transactions.delete(t.id)
+            p "Incluindo na fila wait #{t.id}, #{operation.type}(#{operation.dado})"
           else
             t.execute d
-            if t.finished? then
-              transactions.delete_at posicao
-              if !d.fila_wait.empty?
-                transactions.push(d.fila_wait.pop)
-              end
-              p "Commiting thread: #{t.id.to_s}"
-            end
-          end
+          end #fila wait
         end #ts comparison
       end # operation type
     end #while
@@ -152,13 +183,13 @@ class Scheduler
   end
 end
 
-@transactions = Array.new
+@transactions = Hash.new
 f = File.new(ARGV[0])
 f.each_line { |line|
   p "Lendo transacao: #{line.chomp!}"
-  ts = rand(9999)
+  ts = rand(10)
   id = f.lineno - 1
-  @transactions.push Transacao.new(line, ts, id)
+  @transactions[id] = Transacao.new(line, ts, id)
 }
 
 Scheduler.schedule(@transactions)
