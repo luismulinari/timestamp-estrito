@@ -9,7 +9,7 @@ class Transacao
     @historia.split(' ').each { |a| @operations.push Operacao.new(a[0,1], a[2,1]) }
     @ts = ts
     @id = id
-    p "Transacao criada #{@id}, #{}"
+    p "Transacao criada #{@id}, #{@historia}"
   end
 
   def next_operation
@@ -35,7 +35,7 @@ class Transacao
   end
 
   def abort dado
-     op = @operations.first
+    op = @operations.first
     p "Abortada thread: #{@id.to_s};timestamp: #{@ts}; operacao: #{op.type}; dado: #{dado.value};"
   end
 
@@ -61,13 +61,14 @@ end
 class Dado
 
   attr_reader :value
-  attr_accessor :ts_read, :ts_write, :current_transaction
+  attr_accessor :ts_read, :ts_write, :current_transaction, :fila_wait
 
   def initialize value, ts_read, ts_write, current_transaction
     @value = value
     @ts_read = ts_read
     @ts_write = ts_write
     @current_transaction = current_transaction
+    @fila_wait = Array.new
   end
 end
 
@@ -95,12 +96,25 @@ class Scheduler
         if t.ts < d.ts_write then
           t.abort d
           transactions[posicao] = Transacao.new(t.historia, Time.new.to_i, t.id)
+          if !d.fila_wait.empty?
+              transactions.push(d.fila_wait.pop)
+          end
         else
-          t.execute d
-          if t.finished? then
-            transactions.delete_at posicao
-            p "Commiting thread: #{t.id.to_s}"
-          end # finished
+
+          if !d.fila_wait.empty?
+            p "Indo para fila wait #{t.id}", d.fila_wait
+            d.fila_wait[t.id] = t
+            transactions.delete_at(posicao)
+          else
+            t.execute d
+            if t.finished? then
+              transactions.delete_at posicao
+              if !d.fila_wait.empty?
+                  transactions.push(d.fila_wait.pop)
+              end
+              p "Commiting thread: #{t.id.to_s}"
+            end # finished
+          end #fila wait
         end # ts comparison
 
       else
@@ -112,11 +126,23 @@ class Scheduler
         if ((t.ts < d.ts_read) || (t.ts < d.ts_write)) then
           t.abort d
           transactions[posicao] = Transacao.new(t.historia, Time.new.to_i, t.id)
+          if !d.fila_wait.empty?
+            transactions.push(d.fila_wait.pop)
+          end
         else
-          t.execute d
-          if t.finished? then
-            transactions.delete_at posicao
-            p "Commiting thread: #{t.id.to_s}"
+          if !d.fila_wait.empty?
+            p "Indo para fila wait #{t.id}", d.fila_wait
+            d.fila_wait[t.id] = t
+            transactions.delete_at(posicao)
+          else
+            t.execute d
+            if t.finished? then
+              transactions.delete_at posicao
+              if !d.fila_wait.empty?
+                transactions.push(d.fila_wait.pop)
+              end
+              p "Commiting thread: #{t.id.to_s}"
+            end
           end
         end #ts comparison
       end # operation type
@@ -130,8 +156,9 @@ end
 f = File.new(ARGV[0])
 f.each_line { |line|
   p "Lendo transacao: #{line.chomp!}"
-  ts = rand(99999)
-  @transactions.push Transacao.new(line, ts, f.lineno)
+  ts = rand(9999)
+  id = f.lineno - 1
+  @transactions.push Transacao.new(line, ts, id)
 }
 
 Scheduler.schedule(@transactions)
