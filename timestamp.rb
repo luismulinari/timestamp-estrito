@@ -4,11 +4,12 @@ class Transacao
 
   def initialize(historia, ts, id)
 
-    @historia = historia
+    @historia = historia.chomp("\n")
     @operations = []
-    @historia.split(' ').each { |a| @operations.push Operacao.new(a[0], a[2]) }
+    @historia.split(' ').each { |a| @operations.push Operacao.new(a[0,1], a[2,1]) }
     @ts = ts
     @id = id
+    p "Transacao criada #{@id}", self.to_s, "========================================"
   end
 
   def next_operation
@@ -36,6 +37,10 @@ class Transacao
   def abort
     p 'abortando thread: ', @id.to_s, '; timestamp: ', @ts
   end
+
+  def to_s
+    "<Transacao: ID: #{@id};TS #{@ts};HIS #{@historia};OPS: #{@operations.to_s}>"
+  end
 end
 
 class Operacao
@@ -45,6 +50,10 @@ class Operacao
  def initialize type, dado
    @type = type
    @dado = dado
+ end
+
+ def to_s
+  "<Operacao: TYPE: #{@type};DADO #{@dado}>"
  end
 end
 
@@ -111,7 +120,9 @@ end
 transactions = []
 f = File.new(ARGV[0])
 f.each_line { |line|
-  transactions.push Transacao.new(line, Time.new.to_i, f.lineno)
+  p "Lendo transacao: #{line.chomp!}"
+  ts = rand(99999)
+  transactions.push Transacao.new(line, ts, f.lineno)
 }
 
 Scheduler.schedule(transactions)
