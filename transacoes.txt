@@ -1,6 +1,2 @@
-r(X) r(Y) w(X) r(Z)
-r(Y) r(X) w(Y) w(X) r(Z) w(Z)
-w(Y) w(Z) w(K)
-r(X) w(X) r(K) r(Y) r(z) w(Y) r(X)
-r(X) r(Y) r(Z) r(X) r(K) r(B) r(Z)
-r(X)
+r(Y) w(Y) w(Z)
+r(X) r(Y) w(Y) r(Z) w(Z)
