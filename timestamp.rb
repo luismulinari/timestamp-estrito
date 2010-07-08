@@ -111,21 +111,32 @@ class Scheduler
 
       operation = t.next_operation
 
+      if (!dados.key?(operation.dado)) then
+        dados[operation.dado] = Dado.new(operation.dado, 0, 0)
+      end
+
+      dado_atual = dados[operation.dado]
+
+      if !dado_atual.current_transaction.nil? && dado_atual.current_transaction != t.id && t.ts > dado_atual.ts_write then
+
+        dado_atual.fila_wait.insert(0, t)
+        transactions.delete(t.id)
+        p "Incluindo na fila wait #{t.id}, #{operation.type}(#{dado_atual.value})"
+
+        next
+      end
+
+
       if operation.type == 'r' then
 
-        if (!dados.key?(operation.dado)) then
-          dados[operation.dado] = Dado.new(operation.dado, 0, 0)
-        end
+        if t.ts < dado_atual.ts_write then
 
-        d = dados[operation.dado]
-        if t.ts < d.ts_write then
-
-          t.abort d
+          t.abort dado_atual
 
           t.dados_bloqueados.each { |k, db|
               db.current_transaction = nil
               if !db.fila_wait.empty?
-                  t_wait  = d.fila_wait.pop
+                  t_wait  = dado_atual.fila_wait.pop
                   p 'remove wait'
                   transactions[t_wait.id] = t_wait
               end
@@ -134,47 +145,26 @@ class Scheduler
           transactions[t.id] = Transacao.new(t.historia, Time.new.to_i, t.id)
 
         else
-
-          if !d.current_transaction.nil? && d.current_transaction != t.id && t.ts > d.ts_write then
-            d.fila_wait.insert(0, t)
-            transactions.delete(t.id)
-            p "Incluindo na fila wait #{t.id}, #{operation.type}(#{d.value})"
-          else
-
-            t.execute d
-
-          end #fila wait
+          t.execute dado_atual
         end # ts comparison
 
       else
-        if (!dados.key?(operation.dado)) then
-          dados[operation.dado] = Dado.new(operation.dado, 0, 0)
-        end
+        if ((t.ts < dado_atual.ts_read) || (t.ts < dado_atual.ts_write)) then
 
-        d = dados[operation.dado]
-        if ((t.ts < d.ts_read) || (t.ts < d.ts_write)) then
-
-          t.abort d
+          t.abort dado_atual
           transactions[t.id] = Transacao.new(t.historia, Time.new.to_i, t.id)
 
           t.dados_bloqueados.each { |k, db|
               db.current_transaction = nil
               if !db.fila_wait.empty?
-                  t_wait  = d.fila_wait.pop
+                  t_wait  = dado_atual.fila_wait.pop
                   p 'remove wait'
                   transactions[t_wait.id] = t_wait
               end
           }
 
         else
-
-          if !d.current_transaction.nil? && d.current_transaction != t.id && t.ts > d.ts_write then
-            d.fila_wait.insert(0, t)
-            transactions.delete(t.id)
-            p "Incluindo na fila wait #{t.id}, #{operation.type}(#{operation.dado})"
-          else
-            t.execute d
-          end #fila wait
+          t.execute dado_atual
         end #ts comparison
       end # operation type
     end #while
