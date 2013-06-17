@@ -4,7 +4,6 @@ class Transacao
   attr_reader :id, :ts, :historia
 
   def initialize(historia, ts, id)
-
     @historia = historia.chomp("\n")
     @operations = Array.new
     @historia.split(' ').each { |a| @operations.push Operacao.new(a[0,1], a[2,1]) }
@@ -24,7 +23,6 @@ class Transacao
   end
 
   def execute(dado)
-
      op = @operations.first
      @operations.delete_at(0)
 
